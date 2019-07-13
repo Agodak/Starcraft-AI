@@ -21,23 +21,24 @@ _SELECT_ALL = [0]
 step_mul = 16
 steps = 400
 FLAGS = flags.FLAGS
-flags.DEFINE_string("map", "CollectMineralShards", "Name of a map to use to play.")
+flags.DEFINE_string("map", "DefeatZerglingsAndBanelings", "Name of a map to use to play.")
+flags.DEFINE_string("algorithm", "deepq", "RL algorithm to use.")
 
 def main():
     FLAGS(sys.argv)
     if FLAGS.algorithm == 'deepq':
-        with sc2_env.SC2Env(map_name="CollectMineralShards", step_mul=step_mul, visualize=True, game_steps_per_episode=steps * step_mul, agent_interface_format=features.AgentInterfaceFormat(feature_dimensions=features.Dimensions(screen=16, minimap=16), use_feature_units=True)) as env:
+        with sc2_env.SC2Env(map_name=FLAGS.map, step_mul=step_mul, visualize=True, game_steps_per_episode=steps * step_mul, agent_interface_format=features.AgentInterfaceFormat(feature_dimensions=features.Dimensions(screen=16, minimap=16), use_feature_units=True)) as env:
             model = deepq.models.cnn_to_mlp(convs=[(32, 8, 4), (64, 4, 2), (64, 3, 1)], hiddens=[256], dueling=True)
 
             def make_obs_ph(name):
-                return U.BatchInput((1, 64, 64), name=name)
+                return U.BatchInput((1, 16, 16), name=name)
             act_params = {
                 'make_obs_ph': make_obs_ph,
                 'q_func': model,
                 'num_actions': 4,
             }
-            act_x = deepq_mineral_shards.load("mineral_shards_x.pkl", act_params=act_params)
-            act_y = deepq_mineral_shards.load("mineral_shards_y.pkl", act_params=act_params)
+            act_x = deepq_mineral_shards.load("zerg_x.pkl", act_params=act_params)
+            act_y = deepq_mineral_shards.load("zerg_y.pkl", act_params=act_params)
             act = [act_x, act_y]
 
 if __name__ == '__main__':

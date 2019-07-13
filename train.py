@@ -8,6 +8,7 @@ import deepq_mineral_shards
 import datetime
 from baselines.logger import Logger, TensorBoardOutputFormat, HumanOutputFormat
 import random
+import deepq_defeat_zerglings
 
 _MOVE_SCREEN = actions.FUNCTIONS.Move_screen.id
 _SELECT_ARMY = actions.FUNCTIONS.select_army.id
@@ -15,11 +16,11 @@ _SELECT_ALL = [0]
 _NOT_QUEUED = [0]
 step_mul = 8
 FLAGS = flags.FLAGS
-flags.DEFINE_string("map", "CollectMineralShards", "Name of a map to use to play.")
+flags.DEFINE_string("map", "DefeatZerglingsAndBanelings", "Name of a map to use to play.")
 flags.DEFINE_string("log", "tensorboard", "Logging type(stdout, tensorboard)")
 flags.DEFINE_string("algorithm", "deepq", "RL algorithm to use.")
 flags.DEFINE_integer("timesteps", 2000, "Steps to train")
-flags.DEFINE_float("exploration_fraction", 0.2, "Exploration Fraction")
+flags.DEFINE_float("exploration_fraction", 0.1, "Exploration Fraction")
 flags.DEFINE_boolean("prioritized", True, "prioritized_replay")
 flags.DEFINE_boolean("dueling", True, "dueling")
 flags.DEFINE_float("lr", 0.001, "Learning rate")
@@ -52,11 +53,17 @@ def main():
         Logger.DEFAULT = Logger.CURRENT = Logger(dir=None, output_formats=[HumanOutputFormat(sys.stdout)])
     if FLAGS.mode == "train":
         if FLAGS.algorithm == "deepq":
-            with sc2_env.SC2Env(map_name="CollectMineralShards", step_mul=step_mul, visualize=True, agent_interface_format=features.AgentInterfaceFormat(feature_dimensions=features.Dimensions(screen=16, minimap=16), use_feature_units=True)) as env:
-                model = deepq.models.cnn_to_mlp(convs=[(16, 8, 4), (32, 4, 2)], hiddens=[256], dueling=True)
-                act_x, act_y = deepq_mineral_shards.learn(env, q_func=model, num_actions=16, lr=FLAGS.lr, max_timesteps=FLAGS.timesteps, buffer_size=10000, exploration_fraction=FLAGS.exploration_fraction, exploration_final_eps=0.01, train_freq=4, learning_starts=10000, target_network_update_freq=1000, gamma=0.99, prioritized_replay=True, callback=deepq_callback)
-                act_x.save("mineral_shards_x.pkl")
-                act_y.save("mineral_shards_y.pkl")
+            if FLAGS.map == "CollectMineralShards":
+                with sc2_env.SC2Env(map_name="CollectMineralShards", step_mul=step_mul, visualize=True, agent_interface_format=features.AgentInterfaceFormat(feature_dimensions=features.Dimensions(screen=16, minimap=16), use_feature_units=True)) as env:
+                    model = deepq.models.cnn_to_mlp(convs=[(32, 8, 4), (32, 4, 2)], hiddens=[256], dueling=True)
+                    act_x, act_y = deepq_mineral_shards.learn(env, q_func=model, num_actions=16, lr=FLAGS.lr, max_timesteps=FLAGS.timesteps, buffer_size=10000, exploration_fraction=FLAGS.exploration_fraction, exploration_final_eps=0.01, train_freq=4, learning_starts=10000, target_network_update_freq=1000, gamma=0.99, prioritized_replay=True, callback=deepq_callback)
+                    act_x.save("mineral_shards_x.pkl")
+                    act_y.save("mineral_shards_y.pkl")
+            elif FLAGS.map == "DefeatZerglingsAndBanelings":
+                with sc2_env.SC2Env(map_name="DefeatZerglingsAndBanelings", step_mul=step_mul, visualize=True, agent_interface_format=features.AgentInterfaceFormat(feature_dimensions=features.Dimensions(screen=64, minimap=64), use_feature_units=True)) as env:
+                    model = deepq.models.cnn_to_mlp(convs=[(32, 8, 4), (64, 4, 2), (64, 3, 1)], hiddens=[256], dueling=True)
+                    act = deepq_defeat_zerglings.learn(env, q_func=model, num_actions=16, lr=FLAGS.lr, max_timesteps=FLAGS.timesteps, buffer_size=100000, exploration_fraction=FLAGS.exploration_fraction, exploration_final_eps=0.01, train_freq=4, learning_starts=100000, target_network_update_freq=1000, gamma=0.99, prioritized_replay=True, callback=deepq_callback)
+                    act.save("defeat_zerglings.pkl")
 
 def deepq_callback(locals, globals):
     global max_mean_reward, last_filename
@@ -78,9 +85,9 @@ def deepq_callback(locals, globals):
             max_mean_reward = locals['mean_100ep_reward']
             act_x = deepq_mineral_shards.ActWrapper(locals['act_x'])
             act_y = deepq_mineral_shards.ActWrapper(locals['act_y'])
-            filename = os.path.join(PROJ_DIR, 'models/deepq/mineral_x_%s.pkl' % locals['mean_100ep_reward'])
+            filename = os.path.join(PROJ_DIR, 'models/deepq/zerg_x_%s.pkl' % locals['mean_100ep_reward'])
             act_x.save(filename)
-            filename = os.path.join(PROJ_DIR, 'models/deepq/mineral_y_%s.pkl' % locals['mean_100ep_reward'])
+            filename = os.path.join(PROJ_DIR, 'models/deepq/zerg_y_%s.pkl' % locals['mean_100ep_reward'])
             act_y.save(filename)
             print("save best mean_100ep_reward model to %s" % filename)
             last_filename = filename
