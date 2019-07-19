@@ -2,6 +2,7 @@ import numpy as np
 from pysc2.lib import actions as sc2_actions
 from pysc2.lib import features
 from pysc2.lib import actions
+from mineral.tsp2 import multistart_localsearch, mk_matrix, distL2
 
 _PLAYER_RELATIVE = features.SCREEN_FEATURES.player_relative.index
 _UNIT_TYPE = features.SCREEN_FEATURES.unit_type.index
@@ -61,6 +62,125 @@ def init(env, obs):
         group_list.append(group_id)
         group_id += 1
     return obs, xy_per_marine
+
+
+def solve_tsp(player_relative, selected, group_list, group_id, dest_per_marine, xy_per_marine):
+    my_dest = None
+    other_dest = None
+    closest, min_dist = None, None
+    actions = []
+    neutral_y, neutral_x = (player_relative == 1).nonzero()
+    player_y, player_x = (selected == 1).nonzero()
+    if "0" in dest_per_marine and "1" in dest_per_marine:
+        if group_id == 0:
+            my_dest = dest_per_marine["0"]
+            other_dest = dest_per_marine["1"]
+        else:
+            my_dest = dest_per_marine["1"]
+            other_dest = dest_per_marine["0"]
+    if len(player_x) > 0:
+        if group_id == 0:
+            xy_per_marine["1"] = [int(player_x.mean()), int(player_y.mean())]
+        else:
+            xy_per_marine["0"] = [int(player_x.mean()), int(player_y.mean())]
+        player = xy_per_marine[str(group_id)]
+        points = [player]
+        for p in zip(neutral_x, neutral_y):
+            if other_dest:
+                dist = np.linalg.norm(np.array(other_dest) - np.array(p))
+                if dist < 10:
+                    continue
+            pp = [p[0], p[1]]
+            if pp not in points:
+                points.append(pp)
+            dist = np.linalg.norm(np.array(player) - np.array(p))
+            if not min_dist or dist < min_dist:
+                closest, min_dist = p, dist
+        solve_tsp = False
+        if my_dest:
+            dist = np.linalg.norm(np.array(player) - np.array(my_dest))
+            if dist < 0.5:
+                solve_tsp = True
+        if my_dest is None:
+            solve_tsp = True
+        if len(points) < 2:
+            solve_tsp = False
+        if solve_tsp:
+            from time import clock
+            init = clock()
+            def report_sol(obj, s=""):
+                print("cpu:%g\tobj:%g\ttour:%s" % (clock(), obj, s))
+            n, D = mk_matrix(points, distL2)
+            niter = 50
+            tour, z = multistart_localsearch(niter, n, D)
+            left, right = None, None
+            for idx in tour:
+                if tour[idx] == 0:
+                    if idx == len(tour) - 1:
+                        right = points[tour[0]]
+                        left = points[tour[idx - 1]]
+                    elif idx == 0:
+                        right = points[tour[idx + 1]]
+                        left = points[tour[len(tour) - 1]]
+                    else:
+                        right = points[tour[idx + 1]]
+                        left = points[tour[idx - 1]]
+            left_d = np.linalg.norm(np.array(player) - np.array(left))
+            right_d = np.linalg.norm(np.array(player) - np.array(right))
+            if right_d > left_d:
+                closest = left
+            else:
+                closest = right
+        dest_per_marine[str(group_id)] = closest
+        if closest:
+            if group_id == 0:
+                actions.append({
+                    "base_action": group_id,
+                    "x0": closest[0],
+                    "y0": closest[1]
+                })
+            else:
+                actions.append({
+                    "base_action": group_id,
+                    "x1": closest[0],
+                    "y1": closest[1]
+                })
+        elif my_dest:
+            if group_id == 0:
+                actions.append({
+                    "base_action": group_id,
+                    "x0": my_dest[0],
+                    "y0": my_dest[1]
+                })
+            else:
+                actions.append({
+                    "base_action": group_id,
+                    "x1": my_dest[0],
+                    "y1": my_dest[1]
+                })
+        else:
+            if group_id == 0:
+                actions.append({
+                    "base_action": 2,
+                    "x0": 0,
+                    "y0": 0
+                })
+            else:
+                actions.append({
+                    "base_action": 2,
+                    "x1": 0,
+                    "y1": 0
+                })
+    if group_id == 0:
+        group_id = 1
+    else:
+        group_id = 0
+    if "0" not in xy_per_marine:
+        xy_per_marine["0"] = [0, 0]
+    if "1" not in xy_per_marine:
+        xy_per_marine["1"] = [0, 0]
+    return actions, group_id, dest_per_marine, xy_per_marine
+
 
 def group_init_queue(player_relative):
     actions = []
