@@ -8,7 +8,6 @@ from baselines.common import set_global_seeds, explained_variance
 from baselines.a2c.utils import discount_with_dones
 from baselines.a2c.utils import Scheduler, find_trainable_variables
 from baselines.a2c.utils import cat_entropy, mse
-from pysc2.env import environment
 from pysc2.lib import actions as sc2_actions
 from common import common
 import nsml
@@ -18,7 +17,7 @@ _NOT_QUEUED = 0
 
 
 class Model(object):
-    def __init__(self, policy, ob_space, ac_space, nenvs, total_timesteps, nprocs=32, nscripts=16, nsteps=20, nstack=4, ent_coef=0.1, vf_coef=0.5, vf_fisher_coef=1.0, lr=0.25, max_grad_norm=0.001, kfac_clip=0.001, lrschedule='linear', alpha=0.99, epsilon=1e-5):
+    def __init__(self, policy, ob_space, ac_space, nenvs, total_timesteps, nprocs=32, nscripts=16, nsteps=20, nstack=4, ent_coef=0.1, vf_coef=0.5, lr=0.25, max_grad_norm=0.001, lrschedule='linear', alpha=0.99, epsilon=1e-5):
         config = tf.ConfigProto(allow_soft_placement=True, intra_op_parallelism_threads=nprocs, inter_op_parallelism_threads=nprocs)
         config.gpu_options.allow_growth = True
         self.sess = sess = tf.Session(config=config)
@@ -30,7 +29,6 @@ class Model(object):
         ADV = tf.placeholder(tf.float32, [nbatch])
         TD_TARGET = tf.placeholder(tf.float32, [nbatch])
         PG_LR = tf.placeholder(tf.float32, [])
-        VF_LR = tf.placeholder(tf.float32, [])
         self.model = step_model = policy(sess, ob_space, ac_space, nenvs, 1, nstack, reuse=False)
         self.model2 = train_model = policy(sess, ob_space, ac_space, nenvs, nsteps, nstack, reuse=True)
         script_mask = tf.concat([tf.zeros([nscripts * nsteps, 1]), tf.ones([(nprocs - nscripts) * nsteps, 1])], axis=0)
@@ -39,7 +37,6 @@ class Model(object):
         pac_weight = tf.reduce_sum(pac_weight * tf.one_hot(A, depth=3), axis=1)
         neglogpac = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=pi, labels=A)
         neglogpac *= tf.stop_gradient(pac_weight)
-        inv_A = 1.0 - tf.cast(A, tf.float32)
         xy0_mask = tf.cast(A, tf.float32)
         xy1_mask = tf.cast(A, tf.float32)
         condition0 = tf.equal(xy0_mask, 2)
@@ -78,7 +75,7 @@ class Model(object):
         grads = list(zip(grads, params))
         trainer = tf.train.RMSPropOptimizer(learning_rate=lr, decay=alpha, epsilon=epsilon)
         _train = trainer.apply_gradients(grads)
-        self.logits = logits = train_model.pi
+        self.logits = train_model.pi
         self.params_common = params_common = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='model/common')
         self.params_xy0 = params_xy0 = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='model/xy0') + params_common
         train_loss_xy0 = pg_loss_xy0 - entropy * ent_coef + vf_coef + vf_loss

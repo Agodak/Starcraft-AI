@@ -72,32 +72,24 @@ def load(path, act_params, num_cpu=4):
     return ActWrapper.load(path, num_cpu=num_cpu, act_params=act_params)
 
 
-def learn(env, q_func, num_actions=4, lr=5e-4, max_timesteps=100000, buffer_size=50000, exploration_fraction=0.1, exploration_final_eps=0.02, train_freq=1, batch_size=32, print_freq=1, checkpoint_freq=10000, learning_starts=1000, gamma=1.0, target_network_update_freq=500, prioritized_replay=False, prioritized_replay_alpha=0.6, prioritized_replay_beta0=0.4, prioritized_replay_beta_iters=None, prioritized_replay_eps=1e-6, num_cpu=16, param_noise=False, param_noise_threshold=0.05, callback=None):
+def learn(env, q_func, num_actions, lr, max_timesteps, max_memory, epsilon_decay_rate, epsilon_min, epsilon_max, train_freq, batch_size=32, print_freq=1, checkpoint_freq=10000, target_network_update_freq=500, param_noise=False, param_noise_threshold=0.05, num_cpu=16, callback=None):
     sess = V.make_session(num_cpu=num_cpu)
     sess.__enter__()
 
     def make_obs_ph(name):
         return U.BatchInput((1, 16, 16), name=name)
-    act_x, train_x, update_target_x, debug_x = deepq.build_train(make_obs_ph=make_obs_ph, q_func=q_func, num_actions=num_actions, optimizer=tf.train.AdamOptimizer(learning_rate=lr), gamma=gamma, grad_norm_clipping=10, scope="deepq_x")
-    act_y, train_y, update_target_y, debug_y = deepq.build_train(make_obs_ph=make_obs_ph, q_func=q_func, num_actions=num_actions, optimizer=tf.train.AdamOptimizer(learning_rate=lr), gamma=gamma, grad_norm_clipping=10, scope="deepq_y")
+    act_x, train_x, update_target_x, debug_x = deepq.build_train(make_obs_ph=make_obs_ph, q_func=q_func, num_actions=num_actions, optimizer=tf.train.RMSPropOptimizer(learning_rate=lr), gamma=gamma, grad_norm_clipping=10, scope="deepq_x")
+    act_y, train_y, update_target_y, debug_y = deepq.build_train(make_obs_ph=make_obs_ph, q_func=q_func, num_actions=num_actions, optimizer=tf.train.RMSPropOptimizer(learning_rate=lr), gamma=gamma, grad_norm_clipping=10, scope="deepq_y")
     act_params = {
         'make_obs_ph': make_obs_ph,
         'q_func': q_func,
         'num_actions': num_actions,
     }
-    if prioritized_replay:
-        replay_buffer_x = PrioritizedReplayBuffer(buffer_size, alpha=prioritized_replay_alpha)
-        replay_buffer_y = PrioritizedReplayBuffer(buffer_size, alpha=prioritized_replay_alpha)
-        if prioritized_replay_beta_iters is None:
-            prioritized_replay_beta_iters = max_timesteps
-        beta_schedule_x = LinearSchedule(prioritized_replay_beta_iters, initial_p=prioritized_replay_beta0, final_p=1.0)
-        beta_schedule_y = LinearSchedule(prioritized_replay_beta_iters, initial_p=prioritized_replay_beta0, final_p=1.0)
-    else:
-        replay_buffer_x = ReplayBuffer(buffer_size)
-        replay_buffer_y = ReplayBuffer(buffer_size)
-        beta_schedule_x = None
-        beta_schedule_y = None
-    exploration = LinearSchedule(schedule_timesteps=int(exploration_fraction * max_timesteps), initial_p=1.0, final_p=exploration_final_eps)
+    replay_buffer_x = ReplayBuffer(max_memory)
+    replay_buffer_y = ReplayBuffer(max_memory)
+    beta_schedule_x = None
+    beta_schedule_y = None
+    exploration = LinearSchedule(schedule_timesteps=int(epsilon_decay_rate * max_timesteps), initial_p=epsilon_max, final_p=epsilon_min)
     V.initialize()
     update_target_x()
     update_target_y()
@@ -107,7 +99,7 @@ def learn(env, q_func, num_actions=4, lr=5e-4, max_timesteps=100000, buffer_size
     obs = env.step(actions=[sc2_actions.FunctionCall(_SELECT_ARMY, [_SELECT_ALL])])
     player_relative = obs[0].observation["feature_screen"][_PLAYER_RELATIVE]
     screen = (player_relative == _PLAYER_NEUTRAL).astype(int)
-    screen = np.reshape(screen, (1, 16, 16))
+    screen = np.reshape(screen, (1, 64, 64))
     player_y, player_x = (player_relative == _PLAYER_FRIENDLY).nonzero()
     reset = True
     with tempfile.TemporaryDirectory() as td:
@@ -142,7 +134,7 @@ def learn(env, q_func, num_actions=4, lr=5e-4, max_timesteps=100000, buffer_size
             obs = env.step(actions=new_action)
             player_relative = obs[0].observation["feature_screen"][_PLAYER_RELATIVE]
             new_screen = (player_relative == _PLAYER_NEUTRAL).astype(int)
-            new_screen = np.reshape(new_screen, (1, 16, 16))
+            new_screen = np.reshape(new_screen, (1, 64, 64))
             player_y, player_x = (player_relative == _PLAYER_FRIENDLY).nonzero()
             rew = obs[0].reward
             done = obs[0].step_type == environment.StepType.LAST
@@ -159,25 +151,14 @@ def learn(env, q_func, num_actions=4, lr=5e-4, max_timesteps=100000, buffer_size
                 env.step(actions=[sc2_actions.FunctionCall(_SELECT_ARMY, [_SELECT_ALL])])
                 episode_rewards.append(0.0)
                 reset = True
-            if t > learning_starts and t % train_freq == 0:
-                if prioritized_replay:
-                    experience_x = replay_buffer_x.sample(batch_size, beta=beta_schedule_x.value(t))
-                    (obses_t_x, actions_x, rewards_x, obses_tp1_x, dones_x, weights_x, batch_idxes_x) = experience_x
-                    experience_y = replay_buffer_y.sample(batch_size, beta=beta_schedule_y.value(t))
-                    (obses_t_y, actions_y, rewards_y, obses_tp1_y, dones_y, weights_y, batch_idxes_y) = experience_y
-                else:
-                    obses_t_x, actions_x, rewards_x, obses_tp1_x, dones_x = replay_buffer_x.sample(batch_size)
-                    weights_x, batch_idxes_x = np.ones_like(rewards_x), None
-                    obses_t_y, actions_y, rewards_y, obses_tp1_y, dones_y = replay_buffer_y.sample(batch_size)
-                    weights_y, batch_idxes_y = np.ones_like(rewards_y), None
+            if t % train_freq == 0:
+                obses_t_x, actions_x, rewards_x, obses_tp1_x, dones_x = replay_buffer_x.sample(batch_size)
+                weights_x, batch_idxes_x = np.ones_like(rewards_x), None
+                obses_t_y, actions_y, rewards_y, obses_tp1_y, dones_y = replay_buffer_y.sample(batch_size)
+                weights_y, batch_idxes_y = np.ones_like(rewards_y), None
                 td_errors_x = train_x(obses_t_x, actions_x, rewards_x, obses_tp1_x, dones_x, weights_x)
                 td_errors_y = train_x(obses_t_y, actions_y, rewards_y, obses_tp1_y, dones_y, weights_y)
-                if prioritized_replay:
-                    new_priorities_x = np.abs(td_errors_x) + prioritized_replay_eps
-                    new_priorities_y = np.abs(td_errors_y) + prioritized_replay_eps
-                    replay_buffer_x.update_priorities(batch_idxes_x, new_priorities_x)
-                    replay_buffer_y.update_priorities(batch_idxes_y, new_priorities_y)
-            if t > learning_starts and t % target_network_update_freq == 0:
+            if t % target_network_update_freq == 0:
                 update_target_x()
                 update_target_y()
             mean_100ep_reward = round(np.mean(episode_rewards[-101:-1]), 1)
@@ -189,7 +170,7 @@ def learn(env, q_func, num_actions=4, lr=5e-4, max_timesteps=100000, buffer_size
                 logger.record_tabular("mean 100 episode reward", mean_100ep_reward)
                 logger.record_tabular("% time spent exploring", int(100 * exploration.value(t)))
                 logger.dump_tabular()
-            if (checkpoint_freq is not None and t > learning_starts and num_episodes > 100 and t % checkpoint_freq == 0):
+            if (checkpoint_freq is not None and num_episodes > 100 and t % checkpoint_freq == 0):
                 if saved_mean_reward is None or mean_100ep_reward > saved_mean_reward:
                     if print_freq is not None:
                         logger.log("Saving model due to mean reward increase: {} -> {}".format(saved_mean_reward, mean_100ep_reward))

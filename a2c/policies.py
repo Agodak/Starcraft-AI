@@ -1,11 +1,6 @@
 import numpy as np
 import tensorflow as tf
 from baselines.a2c.utils import conv, fc, conv_to_fc, sample
-from baselines.acktr.utils import dense, kl_div
-from baselines.common.distributions import make_pdtype
-import baselines.common.tf_util as U
-from pysc2.lib.features import actions
-
 
 class CnnPolicy(object):
     def __init__(self, sess, ob_space, ac_space, nenv, nsteps, nstack, reuse=False):
