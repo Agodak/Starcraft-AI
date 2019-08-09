@@ -4,7 +4,6 @@ import dill
 import tempfile
 import tensorflow as tf
 import zipfile
-from absl import flags
 import baselines.deepq.utils as U
 import baselines.common.tf_util as V
 from baselines import logger
@@ -26,9 +25,6 @@ _ATTACK_SCREEN = actions.FUNCTIONS.Attack_screen.id
 _SELECT_ARMY = actions.FUNCTIONS.select_army.id
 _NOT_QUEUED = [0]
 _SELECT_ALL = [0]
-
-FLAGS = flags.FLAGS
-
 
 class ActWrapper(object):
     def __init__(self, act):
@@ -72,14 +68,22 @@ def load(path, act_params, num_cpu=4):
     return ActWrapper.load(path, num_cpu=num_cpu, act_params=act_params)
 
 
-def learn(env, q_func, num_actions, lr, max_timesteps, max_memory, epsilon_decay_rate, epsilon_min, epsilon_max, train_freq, batch_size=32, print_freq=1, checkpoint_freq=10000, target_network_update_freq=500, param_noise=False, param_noise_threshold=0.05, num_cpu=16, callback=None):
+def learn(env, q_func, num_actions, lr, max_timesteps, max_memory, epsilon_decay_rate, epsilon_min, epsilon_max,
+          train_freq, batch_size=32, print_freq=1, checkpoint_freq=10000, target_network_update_freq=500,
+          param_noise=False, param_noise_threshold=0.05, num_cpu=16, callback=None):
     sess = V.make_session(num_cpu=num_cpu)
     sess.__enter__()
 
     def make_obs_ph(name):
-        return U.BatchInput((1, 16, 16), name=name)
-    act_x, train_x, update_target_x, debug_x = deepq.build_train(make_obs_ph=make_obs_ph, q_func=q_func, num_actions=num_actions, optimizer=tf.train.RMSPropOptimizer(learning_rate=lr), gamma=gamma, grad_norm_clipping=10, scope="deepq_x")
-    act_y, train_y, update_target_y, debug_y = deepq.build_train(make_obs_ph=make_obs_ph, q_func=q_func, num_actions=num_actions, optimizer=tf.train.RMSPropOptimizer(learning_rate=lr), gamma=gamma, grad_norm_clipping=10, scope="deepq_y")
+        return U.BatchInput((1, 64, 64), name=name)
+    act_x, train_x, update_target_x, debug_x = deepq.build_train(make_obs_ph=make_obs_ph, q_func=q_func,
+                                                                 num_actions=num_actions,
+                                                                 optimizer=tf.train.RMSPropOptimizer(learning_rate=lr),
+                                                                 grad_norm_clipping=10, scope="deepq_x")
+    act_y, train_y, update_target_y, debug_y = deepq.build_train(make_obs_ph=make_obs_ph, q_func=q_func,
+                                                                 num_actions=num_actions,
+                                                                 optimizer=tf.train.RMSPropOptimizer(learning_rate=lr),
+                                                                 grad_norm_clipping=10, scope="deepq_y")
     act_params = {
         'make_obs_ph': make_obs_ph,
         'q_func': q_func,
@@ -89,7 +93,8 @@ def learn(env, q_func, num_actions, lr, max_timesteps, max_memory, epsilon_decay
     replay_buffer_y = ReplayBuffer(max_memory)
     beta_schedule_x = None
     beta_schedule_y = None
-    exploration = LinearSchedule(schedule_timesteps=int(epsilon_decay_rate * max_timesteps), initial_p=epsilon_max, final_p=epsilon_min)
+    exploration = LinearSchedule(schedule_timesteps=int(epsilon_decay_rate * max_timesteps), initial_p=epsilon_max,
+                                 final_p=epsilon_min)
     V.initialize()
     update_target_x()
     update_target_y()
@@ -119,7 +124,8 @@ def learn(env, q_func, num_actions, lr, max_timesteps, max_memory, epsilon_decay
                 if param_noise_threshold >= 0.:
                     update_param_noise_threshold = param_noise_threshold
                 else:
-                    update_param_noise_threshold = -np.log(1. - exploration.value(t) + exploration.value(t) / float(num_actions))
+                    update_param_noise_threshold = -np.log(1. - exploration.value(t) + exploration.value(t) /
+                                                           float(num_actions))
                 kwargs['reset'] = reset
                 kwargs['update_param_noise_threshold'] = update_param_noise_threshold
                 kwargs['update_param_noise_scale'] = True
@@ -173,7 +179,8 @@ def learn(env, q_func, num_actions, lr, max_timesteps, max_memory, epsilon_decay
             if (checkpoint_freq is not None and num_episodes > 100 and t % checkpoint_freq == 0):
                 if saved_mean_reward is None or mean_100ep_reward > saved_mean_reward:
                     if print_freq is not None:
-                        logger.log("Saving model due to mean reward increase: {} -> {}".format(saved_mean_reward, mean_100ep_reward))
+                        logger.log("Saving model due to mean reward increase: {} -> {}".format(saved_mean_reward,
+                                                                                               mean_100ep_reward))
                     U.save_state(model_file)
                     model_saved = True
                     saved_mean_reward = mean_100ep_reward

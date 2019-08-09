@@ -7,8 +7,7 @@ import os
 import deepq_mineral_shards
 import datetime
 from common.vec_env.subproc_vec_env import SubprocVecEnv
-from a2c.policies import CnnPolicy
-from a2c import a2c
+import a2c
 from baselines.logger import Logger, TensorBoardOutputFormat, HumanOutputFormat
 import deepq_defeat_zerglings
 import deepq_beacon
@@ -19,6 +18,7 @@ flags.DEFINE_string("map", "FindAndDefeatZerglings", "Name of a map to use to pl
 flags.DEFINE_string("log", "tensorboard", "Logging type(stdout, tensorboard)")
 flags.DEFINE_string("algorithm", "a2c", "RL algorithm to use.")
 flags.DEFINE_integer("timesteps", 2000000, "Steps to train")
+FLAGS.DEFINE_float("discount_factor", 0.95, "Discount for future rewards")
 flags.DEFINE_float("epsilon_max", 1, "Starting value of epsilon")
 flags.DEFINE_float("epsilon_min", 0, "Final value of epsilon")
 flags.DEFINE_float("epsilon_decay_rate", 0.01, "Final value of epsilon")
@@ -44,7 +44,7 @@ def main():
     print("lr : %s" % FLAGS.lr)
     logdir = "tensorboard"
     if FLAGS.algorithm == "deepq":
-        logdir = "tensorboard/mineral/%s/%s_%s_lr%s%s" % (FLAGS.algorithm, FLAGS.timesteps, FLAGS.lr, start_time)
+        logdir = "tensorboard/mineral/%s/%s_lr%s%s" % (FLAGS.algorithm, FLAGS.timesteps, FLAGS.lr, start_time)
     elif FLAGS.algorithm == "a2c":
         logdir = "tensorboard/mineral/%s/%s/lr%s/%s" % (FLAGS.algorithm, FLAGS.timesteps, FLAGS.lr, start_time)
     if FLAGS.log == "tensorboard":
@@ -54,40 +54,66 @@ def main():
     if FLAGS.mode == "train":
         if FLAGS.algorithm == "deepq":
             if FLAGS.map == "CollectMineralShards":
-                with sc2_env.SC2Env(map_name="CollectMineralShards", step_mul=step_mul, visualize=True, agent_interface_format=features.AgentInterfaceFormat(feature_dimensions=features.Dimensions(screen=64, minimap=64), use_feature_units=True)) as env:
+                with sc2_env.SC2Env(map_name="CollectMineralShards", step_mul=step_mul, visualize=True,
+                                    agent_interface_format=features.AgentInterfaceFormat(
+                                        feature_dimensions=features.Dimensions(screen=64, minimap=64),
+                                        use_feature_units=True)) as env:
                     model = deepq.models.cnn_to_mlp(convs=[(16, 8, 4), (32, 4, 2)], hiddens=[256], dueling=True)
-                    act_x, act_y = deepq_mineral_shards.learn(env, q_func=model, num_actions=16, lr=FLAGS.lr, max_timesteps=FLAGS.timesteps, max_memory=FLAGS.max_memory, epsilon_decay_rate=FLAGS.epsilon_decay_rate, epsilon_min=FLAGS.epsilon_min, epsilon_max=FLAGS.epsilon_max, train_freq=FLAGS.train_frequency, target_network_update_freq=FLAGS.target_update_frequency, callback=deepq_callback)
+                    act_x, act_y = deepq_mineral_shards.learn(env, q_func=model, num_actions=16, lr=FLAGS.lr,
+                                                              max_timesteps=FLAGS.timesteps,
+                                                              max_memory=FLAGS.max_memory,
+                                                              epsilon_decay_rate=FLAGS.epsilon_decay_rate,
+                                                              epsilon_min=FLAGS.epsilon_min,
+                                                              epsilon_max=FLAGS.epsilon_max,
+                                                              train_freq=FLAGS.train_frequency,
+                                                              target_network_update_freq=FLAGS.target_update_frequency,
+                                                              callback=deepq_callback)
                     act_x.save("mineral_shards_x.pkl")
                     act_y.save("mineral_shards_y.pkl")
             elif FLAGS.map == "FindAndDefeatZerglings":
-                with sc2_env.SC2Env(map_name="FindAndDefeatZerglings", step_mul=step_mul, visualize=True, agent_interface_format=features.AgentInterfaceFormat(feature_dimensions=features.Dimensions(screen=64, minimap=64), use_feature_units=True)) as env:
+                with sc2_env.SC2Env(map_name="FindAndDefeatZerglings", step_mul=step_mul, visualize=True,
+                                    agent_interface_format=features.AgentInterfaceFormat(
+                                        feature_dimensions=features.Dimensions(screen=64, minimap=64),
+                                        use_feature_units=True)) as env:
                     model = deepq.models.cnn_to_mlp(convs=[(16, 8, 4), (32, 4, 2)], hiddens=[256], dueling=True)
-                    act = deepq_defeat_zerglings.learn(env, q_func=model, num_actions=16, lr=FLAGS.lr, max_timesteps=FLAGS.timesteps, max_memory=FLAGS.max_memory, epsilon_decay_rate=FLAGS.epsilon_decay_rate, epsilon_min=FLAGS.epsilon_min, epsilon_max=FLAGS.epsilon_max, train_freq=FLAGS.train_frequency, target_network_update_freq=FLAGS.target_update_frequency, callback=deepq_callback)
+                    act = deepq_defeat_zerglings.learn(env, q_func=model, num_actions=16, lr=FLAGS.lr,
+                                                       max_timesteps=FLAGS.timesteps, max_memory=FLAGS.max_memory,
+                                                       epsilon_decay_rate=FLAGS.epsilon_decay_rate,
+                                                       epsilon_min=FLAGS.epsilon_min, epsilon_max=FLAGS.epsilon_max,
+                                                       train_freq=FLAGS.train_frequency,
+                                                       target_network_update_freq=FLAGS.target_update_frequency,
+                                                       callback=deepq_callback)
                     act.save("defeat_zerglings.pkl")
             elif FLAGS.map == "MoveToBeacon":
-                with sc2_env.SC2Env(map_name="MoveToBeacon", step_mul=step_mul, visualize=True, agent_interface_format=features.AgentInterfaceFormat(feature_dimensions=features.Dimensions(screen=64, minimap=64), use_feature_units=True)) as env:
+                with sc2_env.SC2Env(map_name="MoveToBeacon", step_mul=step_mul, visualize=True,
+                                    agent_interface_format=features.AgentInterfaceFormat(
+                                        feature_dimensions=features.Dimensions(screen=64, minimap=64),
+                                        use_feature_units=True)) as env:
                     model = deepq.models.cnn_to_mlp(convs=[(16, 8, 4), (32, 4, 2)], hiddens=[256], dueling=True)
-                    act_x, act_y = deepq_beacon.learn(env, q_func=model, num_actions=16, lr=FLAGS.lr, max_timesteps=FLAGS.timesteps, max_memory=FLAGS.max_memory, epsilon_decay_rate=FLAGS.epsilon_decay_rate, epsilon_min=FLAGS.epsilon_min, epsilon_max=FLAGS.epsilon_max, train_freq=FLAGS.train_frequency, target_network_update_freq=FLAGS.target_update_frequency, callback=deepq_callback)
+                    act_x, act_y = deepq_beacon.learn(env, q_func=model, num_actions=16, lr=FLAGS.lr,
+                                                      max_timesteps=FLAGS.timesteps, max_memory=FLAGS.max_memory,
+                                                      epsilon_decay_rate=FLAGS.epsilon_decay_rate,
+                                                      epsilon_min=FLAGS.epsilon_min, epsilon_max=FLAGS.epsilon_max,
+                                                      train_freq=FLAGS.train_frequency,
+                                                      target_network_update_freq=FLAGS.target_update_frequency,
+                                                      callback=deepq_callback)
                     act_x.save("beacon_x.pkl")
                     act_y.save("beacon_y.pkl")
         elif FLAGS.algorithm == "a2c":
-            seed = 0
-            env = SubprocVecEnv(FLAGS.map)
-            policy_fn = CnnPolicy
-            a2c.learn(policy_fn, env, seed, total_timesteps=FLAGS.timesteps, ent_coef=FLAGS.regularization_strength, nsteps=FLAGS.trajectory_training_steps, max_grad_norm=FLAGS.value_gradient_strength, callback=a2c_callback)
+            env = SubprocVecEnv(map_name=FLAGS.map, nscripts=1, nenvs=1)
+            agent = a2c.Agent(env, discount=FLAGS.discount_factor, lr=FLAGS.lr)
+            agent.learn(env, regularization=FLAGS.regularization_strength, value_gradient=FLAGS.value_gradient_strength)
     elif FLAGS.mode == "run":
         if FLAGS.algorithm == "a2c":
-            num_timesteps = 2000
-            seed = 0
-            env = SubprocVecEnv(FLAGS.map)
-            policy_fn = CnnPolicy
-            a2c.run(policy_fn, env, seed, total_timesteps=FLAGS.timesteps, ent_coef=FLAGS.regularization_strength, nsteps=FLAGS.trajectory_training_steps, max_grad_norm=FLAGS.value_gradient_strength, callback=a2c_callback)
-
+            env = SubprocVecEnv(map_name=FLAGS.map, nscripts=1, nenvs=1)
+            agent = a2c.Agent(env, discount=FLAGS.discount_factor, lr=FLAGS.lr)
+            agent.run(env)
 
 def deepq_callback(locals, globals):
     global max_mean_reward, last_filename
     if 'done' in locals and locals['done'] == True:
-        if 'mean_100ep_reward' in locals and locals['num_episodes'] >= 10 and locals['mean_100ep_reward'] > max_mean_reward:
+        if 'mean_100ep_reward' in locals and locals['num_episodes'] >= 10 and locals['mean_100ep_reward'] > \
+                max_mean_reward:
             print("mean_100ep_reward : %s max_mean_reward : %s" % (locals['mean_100ep_reward'], max_mean_reward))
             if not os.path.exists(os.path.join(PROJ_DIR, 'models/deepq')):
                 try:
@@ -122,29 +148,6 @@ def deepq_callback(locals, globals):
                 act_y.save(filename)
             print("Save best mean_100ep_reward model to %s" % filename)
             last_filename = filename
-
-def a2c_callback(locals, globals):
-    global max_mean_reward, last_filename
-    if 'mean_100ep_reward' in locals and locals['num_episodes'] >= 10 and locals['mean_100ep_reward'] > max_mean_reward:
-        print("mean_100ep_reward: %s max_mean_reward : %s" % (locals['mean_100ep_reward'], max_mean_reward))
-        if not os.path.exists(os.path.join(PROJ_DIR, 'models/a2c/')):
-            try:
-                os.mkdir(os.path.join(PROJ_DIR, 'models/'))
-            except Exception as e:
-                print(str(e))
-            try:
-                os.mkdir(os.path.join(PROJ_DIR, 'models/a2c/'))
-            except Exception as e:
-                print(str(e))
-        if last_filename != "":
-            os.remove(last_filename)
-            print("delete last model file : %s" % last_filename)
-        max_mean_reward = locals['mean_100ep_reward']
-        model = locals['model']
-        filename = os.path.join(PROJ_DIR, 'models/a2c/%s_%s.pkl' % (FLAGS.map, locals['mean_100ep_reward']))
-        model.save(filename)
-        print("save best mean_100ep_reward model to %s" % filename)
-        last_filename = filename
 
 if __name__ == '__main__':
     main()
